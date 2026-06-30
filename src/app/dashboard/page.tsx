@@ -389,10 +389,7 @@ export default function DashboardPage() {
 
             <div
               className="btn btn-ghost btn-sm"
-              style={{ gap: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
-              onClick={() => signOut({ redirect: false }).then(() => router.replace('/'))}
-              role="button"
-              tabIndex={0}
+              style={{ gap: 6, display: 'inline-flex', alignItems: 'center', pointerEvents: 'none' }}
             >
               <User size={13} />
               <span>{session?.user?.name || session?.user?.email}</span>
