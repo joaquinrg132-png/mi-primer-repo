@@ -338,7 +338,7 @@ export default function DashboardPage() {
           <button
             className="nav-item"
             style={{ width: '100%', color: 'var(--status-error)' }}
-            onClick={() => signOut({ callbackUrl: '/' })}
+            onClick={() => signOut({ redirect: false }).then(() => router.replace('/'))}
           >
             <LogOut size={15} strokeWidth={1.75} />
             Cerrar Sesión
@@ -390,7 +390,7 @@ export default function DashboardPage() {
             <div
               className="btn btn-ghost btn-sm"
               style={{ gap: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
-              onClick={() => signOut({ callbackUrl: '/' })}
+              onClick={() => signOut({ redirect: false }).then(() => router.replace('/'))}
               role="button"
               tabIndex={0}
             >
