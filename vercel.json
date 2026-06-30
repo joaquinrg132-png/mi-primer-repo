@@ -1,0 +1,6 @@
+{
+  "framework": "nextjs",
+  "ignoreCommand": "echo 'ignoring'",
+  "buildCommand": "prisma generate && next build",
+  "outputDirectory": ".next"
+}

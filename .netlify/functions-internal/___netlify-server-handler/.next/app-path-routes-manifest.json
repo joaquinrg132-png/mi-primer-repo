@@ -1,0 +1,17 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/auth/[...nextauth]/route": "/api/auth/[...nextauth]",
+  "/api/backup/export/route": "/api/backup/export",
+  "/api/backup/import/route": "/api/backup/import",
+  "/api/conversations/route": "/api/conversations",
+  "/api/messages/route": "/api/messages",
+  "/api/products/route": "/api/products",
+  "/api/upgrade/route": "/api/upgrade",
+  "/api/upload/route": "/api/upload",
+  "/api/users/profile/route": "/api/users/profile",
+  "/api/users/route": "/api/users",
+  "/dashboard/page": "/dashboard",
+  "/favicon.ico/route": "/favicon.ico",
+  "/page": "/"
+}

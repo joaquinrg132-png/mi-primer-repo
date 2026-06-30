@@ -1,0 +1,17 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/api/backup/export/route": "app/api/backup/export/route.js",
+  "/api/backup/import/route": "app/api/backup/import/route.js",
+  "/api/conversations/route": "app/api/conversations/route.js",
+  "/api/messages/route": "app/api/messages/route.js",
+  "/api/products/route": "app/api/products/route.js",
+  "/api/upgrade/route": "app/api/upgrade/route.js",
+  "/api/upload/route": "app/api/upload/route.js",
+  "/api/users/profile/route": "app/api/users/profile/route.js",
+  "/api/users/route": "app/api/users/route.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/page": "app/page.js"
+}
