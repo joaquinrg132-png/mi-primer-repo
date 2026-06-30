@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-// Download individual product sheet (returns the stored fileUrl as redirect or data)
+// Download individual product sheet — preserves original format (.xlsm, .xlsx, etc.)
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -15,68 +15,41 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Este producto no tiene archivo' }, { status: 404 });
     }
 
-    // If it's a base64 data URI, decode and serve as file
     if (product.fileUrl.startsWith('data:')) {
-      const matches = product.fileUrl.match(/^data:([^;]+);base64,(.+)$/);
+      const matches = product.fileUrl.match(/^data:([^;]+);base64,([\s\S]+)$/);
       if (matches) {
-        const mimeType = matches[1];
         const buffer = Buffer.from(matches[2], 'base64');
-        
+
+        // Determinar extensión y Content-Type desde el nombre del archivo original
         let ext = '.xlsx';
+        let contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
         if (product.sourceFileName) {
           const match = product.sourceFileName.match(/\.[0-9a-z]+$/i);
-          if (match) ext = match[0];
-        }
-        const fileName = `${product.name.replace(/[^a-z0-9]/gi, '_')}${ext}`;
-
-        let finalBuffer = buffer;
-        try {
-          if (product.sheetName) {
-            const JSZip = (await import('jszip')).default;
-            const zip = await JSZip.loadAsync(buffer);
-            const workbookXmlFile = zip.file('xl/workbook.xml');
-            
-            if (workbookXmlFile) {
-              let xml = await workbookXmlFile.async('string');
-              const sheetsMatch = xml.match(/<sheets>([\s\S]*?)<\/sheets>/);
-              if (sheetsMatch) {
-                const sheetRegex = /<sheet\s+[^>]*name="([^"]+)"/gi;
-                let match;
-                let sheetIndex = -1;
-                let currentIndex = 0;
-                while ((match = sheetRegex.exec(sheetsMatch[1])) !== null) {
-                  if (match[1].toLowerCase() === product.sheetName.toLowerCase()) {
-                    sheetIndex = currentIndex;
-                    break;
-                  }
-                  currentIndex++;
-                }
-                if (sheetIndex !== -1) {
-                  if (xml.includes('activeTab=')) {
-                    xml = xml.replace(/activeTab="\d+"/, `activeTab="${sheetIndex}"`);
-                  } else {
-                    xml = xml.replace(/<workbookView\s/, `<workbookView activeTab="${sheetIndex}" `);
-                  }
-                  zip.file('xl/workbook.xml', xml);
-                  finalBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-                }
-              }
+          if (match) {
+            ext = match[0].toLowerCase();
+            if (ext === '.xlsm') {
+              contentType = 'application/vnd.ms-excel.sheet.macroenabled.12';
+            } else if (ext === '.xls') {
+              contentType = 'application/vnd.ms-excel';
             }
           }
-        } catch (e) {
-          console.error('Error modifying active tab', e);
         }
 
-        return new Response(finalBuffer, {
+        const safeName = product.name.replace(/[^a-z0-9áéíóúñü ]/gi, '_');
+        const fileName = `${safeName}${ext}`;
+
+        // Devolver archivo tal cual — SIN re-empaquetar con JSZip para no corromper .xlsm
+        return new Response(buffer, {
           headers: {
-            'Content-Type': mimeType,
+            'Content-Type': contentType,
             'Content-Disposition': `attachment; filename="${fileName}"`,
           }
         });
       }
     }
 
-    // Otherwise redirect to the URL
+    // Fallback: redirigir si es URL externa
     return NextResponse.redirect(product.fileUrl);
   } catch (error) {
     console.error('Download error:', error);

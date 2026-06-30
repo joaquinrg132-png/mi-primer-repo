@@ -3,20 +3,21 @@
 import React, { useState, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import { X, Upload, FileSpreadsheet, Check, AlertTriangle, Loader, FileArchive } from 'lucide-react';
+import { X, Upload, FileSpreadsheet, Check, AlertTriangle, Loader } from 'lucide-react';
 
 type SheetEntry = {
   sheetName: string;
   productName: string;
+  code: string;
   characteristics: string;
   length: string;
   category: string;
   rowCount: number;
   selected: boolean;
-  sourceFile: string;   // nombre del archivo Excel de origen (para ZIP con múltiples libros)
-  sourceFileObj: File;  // referencia al File real para enviarlo al backend
+  sourceFile: string;
+  sourceFileObj: File;
+  fileLastModified: number; // timestamp ms
 };
-
 
 type Props = {
   onClose: () => void;
@@ -31,11 +32,10 @@ function readExcelSheets(file: File): Promise<SheetEntry[]> {
       try {
         const arrayBuffer = evt.target?.result as ArrayBuffer;
         const data = new Uint8Array(arrayBuffer);
-        
-        // 1. Extraer datos con SheetJS
+
         const wb = XLSX.read(data, { type: 'array', bookVBA: false });
-        
-        // 2. Extraer imágenes con JSZip (buscando en celda H17)
+
+        // Extraer imágenes con JSZip
         let zip: JSZip | null = null;
         try {
           const JSZipLib = (await import('jszip')).default;
@@ -49,23 +49,22 @@ function readExcelSheets(file: File): Promise<SheetEntry[]> {
           const ws = wb.Sheets[name];
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
           const dataRows = rows.filter(r => r.some(c => c !== null && c !== undefined && c !== ''));
-          
+
           let productName = name;
           if (ws['C19']?.v) productName = String(ws['C19'].v).trim();
-          
+
           let characteristics = '';
           if (ws['C20']?.v) characteristics = String(ws['C20'].v).trim();
-          
+
           let length = '';
           if (ws['C23']?.v) length = String(ws['C23'].v).trim();
-          
-          // Extraer descripción de C21 y C22
+
           let description = '';
           if (ws['C21']?.v) description += String(ws['C21'].v).trim() + '\n';
           if (ws['C22']?.v) description += String(ws['C22'].v).trim();
           description = description.trim();
 
-          // Extraer imagen de H17
+          // Extraer imagen
           let imageUrl = '';
           if (zip) {
             try {
@@ -95,12 +94,10 @@ function readExcelSheets(file: File): Promise<SheetEntry[]> {
                               let absDrawingTarget = `xl/${sheetDir}/${drawingTarget}`.replace(/worksheets\/\.\.\//, '');
                               const drawingXml = await zip.file(absDrawingTarget)?.async('string');
                               if (drawingXml) {
-                                // Buscar la primera imagen incrustada (r:embed)
                                 const anchors = drawingXml.match(/<xdr:[a-zA-Z]+CellAnchor>[\s\S]*?<\/xdr:[a-zA-Z]+CellAnchor>/gi);
                                 if (anchors) {
                                   for (const anchor of anchors) {
                                     const embedMatch = anchor.match(/r:embed="([^"]+)"/i);
-                                    // Tomamos la primera imagen real que encontremos
                                     if (embedMatch) {
                                       const drawingParts = absDrawingTarget.split('/');
                                       const drawingFileName = drawingParts.pop();
@@ -120,7 +117,7 @@ function readExcelSheets(file: File): Promise<SheetEntry[]> {
                                           }
                                         }
                                       }
-                                      break; // Detenerse en la primera imagen que coincida
+                                      break;
                                     }
                                   }
                                 }
@@ -139,15 +136,26 @@ function readExcelSheets(file: File): Promise<SheetEntry[]> {
           }
 
           entries.push({
-            sheetName: name, productName, characteristics, length, category: 'General',
-            description, imageUrl, // Agregados al objeto
-            rowCount: Math.max(0, dataRows.length - 1), selected: true,
-            sourceFile: file.name, sourceFileObj: file
-          });
+            sheetName: name,
+            productName,
+            code: '',
+            characteristics,
+            length,
+            category: 'General',
+            description,
+            imageUrl,
+            rowCount: Math.max(0, dataRows.length - 1),
+            selected: true,
+            sourceFile: file.name,
+            sourceFileObj: file,
+            fileLastModified: file.lastModified,
+          } as any);
         }
-        
+
         resolve(entries);
-      } catch (e) { reject(new Error('No se pudo leer el Excel. Verifica que el archivo no esté dañado.')); }
+      } catch (e) {
+        reject(new Error('No se pudo leer el Excel. Verifica que el archivo no esté dañado.'));
+      }
     };
     reader.onerror = () => reject(new Error('Error al leer el archivo.'));
     reader.readAsArrayBuffer(file);
@@ -158,7 +166,6 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
   const [step, setStep] = useState<'drop' | 'review' | 'uploading' | 'done'>('drop');
   const [fileName, setFileName] = useState('');
   const [sheets, setSheets] = useState<SheetEntry[]>([]);
-  const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
   const [originalFile, setOriginalFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -168,7 +175,6 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
     setErrorMsg('');
     try {
       if (file.name.toLowerCase().endsWith('.zip')) {
-        // Extraer todos los Exceles del ZIP
         const zip = await JSZip.loadAsync(file);
         const excelFiles: File[] = [];
         const promises: Promise<void>[] = [];
@@ -177,7 +183,7 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
             promises.push(
               zipEntry.async('arraybuffer').then(buf => {
                 excelFiles.push(new File([buf], zipEntry.name.split('/').pop() || zipEntry.name,
-                  { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+                  { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', lastModified: Date.now() }));
               })
             );
           }
@@ -186,15 +192,14 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
         if (!excelFiles.length) { setErrorMsg('El ZIP no contiene archivos Excel (.xlsx, .xlsm).'); return; }
         const allSheets: SheetEntry[] = [];
         for (const excelFile of excelFiles) {
-          const sheets = await readExcelSheets(excelFile);
-          allSheets.push(...sheets);
+          const s = await readExcelSheets(excelFile);
+          allSheets.push(...s);
         }
         setOriginalFile(file);
         setFileName(`${file.name} (${excelFiles.length} libro${excelFiles.length > 1 ? 's' : ''})`);
         setSheets(allSheets);
         setStep('review');
       } else {
-        // Archivo Excel directo
         const entries = await readExcelSheets(file);
         if (!entries.length) { setErrorMsg('El archivo no contiene hojas válidas.'); return; }
         setOriginalFile(file);
@@ -230,11 +235,17 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
     const toImport = sheets.filter(s => s.selected);
     if (!toImport.length) { setErrorMsg('Seleccione al menos una hoja para importar.'); return; }
 
+    // Validar que todos los seleccionados tengan código
+    const sinCodigo = toImport.filter(s => !s.code.trim());
+    if (sinCodigo.length > 0) {
+      setErrorMsg(`Asigne un código a todas las hojas seleccionadas. Faltan: ${sinCodigo.map(s => s.productName).join(', ')}`);
+      return;
+    }
+
     setStep('uploading');
     const log: string[] = [];
 
     try {
-      // Agrupar por archivo original (necesario si vienen de un ZIP)
       const groups = new Map<File, SheetEntry[]>();
       for (const s of toImport) {
         if (!groups.has(s.sourceFileObj)) groups.set(s.sourceFileObj, []);
@@ -242,7 +253,6 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
       }
 
       for (const [fileObj, fileSheets] of groups.entries()) {
-        // Convert file to base64 using native FileReader (more reliable in browser than Buffer polyfill)
         const fileDataUri = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target?.result as string);
@@ -257,21 +267,23 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: s.productName,
+              code: s.code.trim(),
               categoryName: s.category || 'General',
               sheetName: s.sheetName,
               characteristics: s.characteristics,
               length: s.length,
-              description: s.description,
-              imageUrl: s.imageUrl,
+              description: (s as any).description,
+              imageUrl: (s as any).imageUrl,
               sourceFileName: fileObj.name,
               fileUrl: fileDataUri,
+              fileLastModified: s.fileLastModified,
               userId: 'system',
-              ...(syncTargetBook ? { syncTargetBook } : {})
+              ...(syncTargetBook ? { syncTargetBook } : {}),
             })
           });
           if (res.ok) createdCount++;
         }
-        log.push(`OK  — Libro '${fileObj.name}' importado (${createdCount} hojas).`);
+        log.push(`OK  — '${fileObj.name}' importado (${createdCount} hojas).`);
       }
     } catch (err) {
       log.push(`ERR — Sin conexión con el servidor.`);
@@ -281,17 +293,16 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
     setStep('done');
   };
 
-
   return (
     <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-window" style={{ width: step === 'review' ? 680 : 480 }}>
+      <div className="modal-window" style={{ width: step === 'review' ? 760 : 480 }}>
 
         {/* Title Bar */}
         <div className="modal-titlebar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <FileSpreadsheet size={14} style={{ color: 'var(--accent)' }} />
             <span className="modal-title">
-              {step === 'drop'      && 'Importar Documento Excel'}
+              {step === 'drop'      && 'Importar Hoja de Excel'}
               {step === 'review'   && `Revisión de Hojas — ${fileName}`}
               {step === 'uploading' && 'Importando registros...'}
               {step === 'done'     && 'Importación Completada'}
@@ -329,11 +340,9 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
                 }}
               >
                 <Upload size={32} style={{ color: dragging ? 'var(--accent)' : 'var(--text-muted)', marginBottom: 14 }} />
-                <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
-                  Arrastre el archivo aquí
-                </p>
+                <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Arrastre el archivo aquí</p>
                 <p style={{ marginTop: 12, marginBottom: 24, color: 'var(--text-secondary)', fontSize: 14 }}>
-                  Arrastra un archivo Excel (.xlsx, .xlsm) o un archivo comprimido (.zip)
+                  Arrastra una hoja Excel (.xlsx, .xlsm) o un archivo comprimido (.zip)
                 </p>
                 <label className="btn btn-primary">
                   Examinar Archivo
@@ -347,7 +356,7 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
               </div>
 
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 16, textAlign: 'center' }}>
-                El sistema detectará automáticamente todas las hojas del documento y permitirá seleccionar cuáles importar.
+                Al importar deberás asignar un <strong>código único</strong> a cada hoja. El sistema evitará crear duplicados automáticamente.
               </p>
             </div>
 
@@ -361,19 +370,32 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
           <>
             <div className="modal-body" style={{ padding: 0 }}>
               <div style={{ padding: '14px 20px', background: 'var(--accent-subtle)', borderBottom: '1px solid var(--accent-border)', fontSize: 13, color: 'var(--accent)' }}>
-                Se detectaron <strong>{sheets.length} hoja{sheets.length !== 1 ? 's' : ''}</strong> en el documento.
+                Se detectaron <strong>{sheets.length} hoja{sheets.length !== 1 ? 's' : ''}</strong>. Asigna un <strong>código obligatorio</strong> a cada hoja antes de importar.
               </div>
 
-              <div style={{ overflowY: 'auto', maxHeight: 360 }}>
+              {errorMsg && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 16px',
+                  background: 'rgba(239,68,68,0.08)', borderBottom: '1px solid rgba(239,68,68,0.25)',
+                  fontSize: 12, color: 'var(--status-error)',
+                }}>
+                  <AlertTriangle size={14} strokeWidth={2.5} style={{ flexShrink: 0, marginTop: 1 }} />
+                  {errorMsg}
+                </div>
+              )}
+
+              <div style={{ overflowY: 'auto', maxHeight: 400 }}>
                 <table className="corp-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 40, textAlign: 'center' }}>Imp.</th>
-                      <th style={{ width: 140 }}>Archivo</th>
-                      <th style={{ width: 140 }}>Pestaña</th>
+                      <th style={{ width: 36, textAlign: 'center' }}>Imp.</th>
+                      <th style={{ width: 120 }}>Archivo</th>
+                      <th style={{ width: 100 }}>Pestaña</th>
                       <th>Nombre del Producto</th>
-                      <th style={{ width: 120 }}>Categoría</th>
-                      <th style={{ width: 60, textAlign: 'right' }}>Filas</th>
+                      <th style={{ width: 100 }}>
+                        Código <span style={{ color: 'var(--status-error)' }}>*</span>
+                      </th>
+                      <th style={{ width: 110 }}>Categoría</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -388,12 +410,12 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
                           />
                         </td>
                         <td>
-                          <span className="badge badge-gray" style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 120, display: 'inline-block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={sheet.sourceFile}>
+                          <span className="badge badge-gray" style={{ fontFamily: 'monospace', fontSize: 10, maxWidth: 110, display: 'inline-block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={sheet.sourceFile}>
                             {sheet.sourceFile}
                           </span>
                         </td>
                         <td>
-                          <span className="badge badge-gray" style={{ fontFamily: 'monospace' }}>{sheet.sheetName}</span>
+                          <span className="badge badge-gray" style={{ fontFamily: 'monospace', fontSize: 11 }}>{sheet.sheetName}</span>
                         </td>
                         <td>
                           <input
@@ -409,15 +431,26 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
                           <input
                             type="text"
                             className="form-input"
+                            style={{
+                              height: 28, fontSize: 12,
+                              borderColor: sheet.selected && !sheet.code.trim() ? 'var(--status-error)' : undefined,
+                            }}
+                            value={sheet.code}
+                            onChange={e => updateSheet(i, 'code', e.target.value)}
+                            disabled={!sheet.selected}
+                            placeholder="Ej: P-001"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            className="form-input"
                             style={{ height: 28, fontSize: 12 }}
                             value={sheet.category}
                             onChange={e => updateSheet(i, 'category', e.target.value)}
                             disabled={!sheet.selected}
                             placeholder="General"
                           />
-                        </td>
-                        <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                          {sheet.rowCount.toLocaleString()}
                         </td>
                       </tr>
                     ))}
@@ -429,7 +462,7 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
               <span style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 'auto' }}>
                 {selectedCount} de {sheets.length} hoja{sheets.length !== 1 ? 's' : ''} seleccionada{selectedCount !== 1 ? 's' : ''}
               </span>
-              <button className="btn btn-ghost" onClick={() => { setStep('drop'); setSheets([]); }}>Volver</button>
+              <button className="btn btn-ghost" onClick={() => { setStep('drop'); setSheets([]); setErrorMsg(''); }}>Volver</button>
               <button className="btn btn-primary" onClick={handleImport} disabled={selectedCount === 0}>
                 Importar {selectedCount > 0 ? `${selectedCount} hoja${selectedCount !== 1 ? 's' : ''}` : ''}
               </button>
@@ -437,7 +470,6 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
           </>
         )}
 
-        {/* ── STEP 3: Uploading ── */}
         {step === 'uploading' && (
           <div className="modal-body" style={{ padding: '48px 32px', textAlign: 'center' }}>
             <Loader size={32} style={{ color: 'var(--accent)', animation: 'spin 1s linear infinite', marginBottom: 16 }} />
@@ -447,7 +479,6 @@ export default function ExcelUploadModal({ onClose, onSuccess, syncTargetBook }:
           </div>
         )}
 
-        {/* ── STEP 4: Done ── */}
         {step === 'done' && (
           <>
             <div className="modal-body">

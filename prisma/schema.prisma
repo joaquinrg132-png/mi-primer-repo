@@ -114,19 +114,21 @@ model Category {
 }
 
 model Product {
-  id             String   @id @default(uuid())
-  name           String
-  categoryId     String
-  category       Category @relation(fields: [categoryId], references: [id])
-  fileUrl        String?
-  sourceFileName String?
-  sheetName      String?  // Nombre exacto de la pestaña en el archivo Excel
-  characteristics String? // Sabor y características principales (celda C20)
-  length          String? // Longitud del producto (celda C23)
-  description    String?
-  imageUrl       String?
-  version        Int      @default(1)
-  updatedBy      String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(uuid())
+  name             String
+  code             String?   // Código asignado al subir (obligatorio desde el sistema)
+  categoryId       String
+  category         Category  @relation(fields: [categoryId], references: [id])
+  fileUrl          String?
+  sourceFileName   String?
+  sheetName        String?   // Nombre exacto de la pestaña en el archivo Excel
+  characteristics  String?   // Sabor y características principales (celda C20)
+  length           String?   // Longitud del producto (celda C23)
+  description      String?
+  imageUrl         String?
+  fileLastModified DateTime? // Fecha real de última modificación del archivo original
+  version          Int       @default(1)
+  updatedBy        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
